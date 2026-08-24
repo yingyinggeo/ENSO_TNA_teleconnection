@@ -1,249 +1,205 @@
 %% =========================================================
-%  高减低 Variability 时期 全球SST Pattern
-%  同时输出：年均距平diff 和 SST variability diff
-%  指数：Nino_EW, TNA, IOB, IOD, AMO, ATL3, SASD, Kuroshio
-%  31yr non-overlapping窗口，±0.5σ分组（按指数variability分组），只画diff
+%  全球SST Mean State & Variability: High minus Low
+%  基于各关键区31yr non-overlapping窗口 VARIABILITY 分组
+%  variability = 850-1850气候态为背景的SST距平，31yr窗口内的std
+%  （IOD、SASD例外，用距平差值的31yr std，反映偶极子强度的变率）
+%  同时输出：高-低 variability 时期，全球SST mean state diff 和
+%            全球SST variability diff
+%  指数：Nino3.4, TNA, IOB, IOD, PDO, AMO, ATL3, SASD
+%  4行2列，只画 High minus Low
 % =========================================================
-% clear; clc;
-%
-% %% ===== PART 1: COMPUTATION =================================
-%
-% %% ---- (1) 加载数据 ------------------------------------------
-% load('C:\Users\yingy\Downloads\Data\Paleo3bs_Project\uv_sst_LME_15ens\iLME_full_ts_mme.mat', ...
-%      'ts_per_fl','lat_af','lon_af');
-% [nlat, nlon, nmon, nens] = size(ts_per_fl);
-% nyear = nmon / 12;
-%
-% %% ---- (2) 面积权重 ------------------------------------------
-% reso_lat = 1.875; reso_lon = 2.5;
-% lat_vec = 90 - reso_lat/2 : -reso_lat : -90 + reso_lat/2;
-% lon_vec = -180 + reso_lon/2 : reso_lon : 180 - reso_lon/2;
-% [~, glat] = meshgrid(lon_vec, lat_vec);
-% area_weight = cosd(glat);
-% sst_last    = squeeze(mean(ts_per_fl(:,:,end,:), 4, 'omitnan'));
-% ocean_mask  = ~isnan(sst_last);
-% area_weight(~ocean_mask) = NaN;
-%
-% %% ---- (3) 定义关键区 ----------------------------------------
-% % Kuroshio: 25N-50N, 140E-180E => lon: 140~180
-% regions_raw = {
-%     'Nino_E',    find(lat_af >= -5  & lat_af <= 5)',  find(lon_af >= -150 & lon_af <= -80)';
-%     'Nino_W',    find(lat_af >= -5  & lat_af <= 5)',  find(lon_af >= 120  & lon_af <= 180)';
-%     'TNA',       36:46,   51:66;
-%     'IOB',       38:70,   89:116;
-%     'WTIO',      44:53,   93:100;
-%     'ETIO',      49:53,  109:116;
-%     'AMO',       17:48,   41:72;
-%     'ATL3',      47:50,   65:72;
-%     'SASD_SW',   64:69,   61:68;
-%     'SASD_NE',   57:62,   65:72;
-%     'Kuroshio',  find(lat_af >= 25  & lat_af <= 50)', find(lon_af >= 140  & lon_af <= 180)';
-% };
-% nreg_raw = size(regions_raw, 1);
-%
-% %% ---- (4) 各关键区逐月面积加权时间序列 ----------------------
-% fprintf('Computing regional monthly series...\n');
-% reg_mon_raw = nan(nmon, nens, nreg_raw);
-%
-% for ireg = 1:nreg_raw
-%     lat_idx = regions_raw{ireg, 2};
-%     lon_idx = regions_raw{ireg, 3};
-%     w       = area_weight(lat_idx, lon_idx);
-%     w_sum   = nansum(w(:));
-%     for iens = 1:nens
-%         for im = 1:nmon
-%             slab = double(ts_per_fl(lat_idx, lon_idx, im, iens));
-%             reg_mon_raw(im, iens, ireg) = nansum(slab(:) .* w(:)) / w_sum;
-%         end
-%     end
-%     fprintf('  %d/%d (%s) done\n', ireg, nreg_raw, regions_raw{ireg,1});
-% end
-% fprintf('Monthly series done.\n');
-%
-% %% ---- (5) 去除季节循环（基于850-1850气候态）----------------
-% fprintf('Computing anomalies...\n');
-% reg_mon_re   = reshape(reg_mon_raw, 12, nyear, nens, nreg_raw);
-% reg_clim     = nanmean(reg_mon_re(:,1:1001,:,:), 2);
-% reg_clim_rep = repmat(reg_clim, 1, nyear, 1, 1);
-% reg_ano_re   = reg_mon_re - reg_clim_rep;
-% reg_sst_annual_raw = squeeze(nanmean(reg_mon_re,  1));  % [nyear x nens x nreg_raw]
-% reg_ano_annual_raw = squeeze(nanmean(reg_ano_re,  1));  % [nyear x nens x nreg_raw]
-% clear reg_mon_raw reg_mon_re reg_clim reg_clim_rep reg_ano_re
-% fprintf('Anomalies done.\n');
-%
-% %% ---- (5b) 合并各区，组成8个指数 ----------------------------
-% % raw顺序: 1=Nino_E, 2=Nino_W, 3=TNA, 4=IOB,
-% %          5=WTIO,   6=ETIO,   7=AMO, 8=ATL3,
-% %          9=SASD_SW, 10=SASD_NE, 11=Kuroshio
-% n_idx_all  = 8;
-% sst_annual = nan(nyear, nens, n_idx_all);
-% ano_annual = nan(nyear, nens, n_idx_all);
-%
-% % 1: Nino_EW = 东区SSTA - 西区SSTA
-% ano_annual(:,:,1) = reg_ano_annual_raw(:,:,1) - reg_ano_annual_raw(:,:,2);
-% sst_annual(:,:,1) = reg_sst_annual_raw(:,:,1) - reg_sst_annual_raw(:,:,2);
-%
-% % 2: TNA
-% sst_annual(:,:,2) = reg_sst_annual_raw(:,:,3);
-% ano_annual(:,:,2) = reg_ano_annual_raw(:,:,3);
-%
-% % 3: IOB
-% sst_annual(:,:,3) = reg_sst_annual_raw(:,:,4);
-% ano_annual(:,:,3) = reg_ano_annual_raw(:,:,4);
-%
-% % 4: IOD = WTIO - ETIO
-% sst_annual(:,:,4) = reg_sst_annual_raw(:,:,5) - reg_sst_annual_raw(:,:,6);
-% ano_annual(:,:,4) = reg_ano_annual_raw(:,:,5) - reg_ano_annual_raw(:,:,6);
-%
-% % 5: AMO
-% sst_annual(:,:,5) = reg_sst_annual_raw(:,:,7);
-% ano_annual(:,:,5) = reg_ano_annual_raw(:,:,7);
-%
-% % 6: ATL3
-% sst_annual(:,:,6) = reg_sst_annual_raw(:,:,8);
-% ano_annual(:,:,6) = reg_ano_annual_raw(:,:,8);
-%
-% % 7: SASD = SW - NE
-% sst_annual(:,:,7) = reg_sst_annual_raw(:,:,9)  - reg_sst_annual_raw(:,:,10);
-% ano_annual(:,:,7) = reg_ano_annual_raw(:,:,9)  - reg_ano_annual_raw(:,:,10);
-%
-% % 8: Kuroshio — 绝对SST均值
-% sst_annual(:,:,8) = reg_sst_annual_raw(:,:,11);
-% ano_annual(:,:,8) = reg_ano_annual_raw(:,:,11);
-%
-% clear reg_sst_annual_raw reg_ano_annual_raw
-%
-% %% ---- (6) 全局SST年均距平 -----------------------------------
-% fprintf('Computing global SST anomalies...\n');
-% sst_mon_re   = reshape(ts_per_fl, nlat, nlon, 12, nyear, nens);
-% sst_clim     = nanmean(sst_mon_re(:,:,:,1:1001,:), 4);
-% sst_clim_rep = repmat(sst_clim, 1, 1, 1, nyear, 1);
-% sst_ano_re   = sst_mon_re - sst_clim_rep;
-% clear ts_per_fl sst_mon_re sst_clim sst_clim_rep
-% sst_ano_annual = squeeze(nanmean(sst_ano_re, 3));   % [nlat x nlon x nyear x nens]
-% clear sst_ano_re
-% fprintf('Global SST anomalies done.\n');
-%
-% %% ---- (7) Non-overlapping 31yr 窗口 -------------------------
-% nyear_clim = 1001;
-% win_size   = 31;
-% nwin       = floor(nyear_clim / win_size);
-% idx_names  = {'Nino EW','TNA','IOB','IOD','AMO','ATL3','SASD','Kuroshio'};
-% fprintf('Non-overlapping windows: %d\n', nwin);
-%
-% idx_win_var_group = nan(nwin, nens, n_idx_all);
-% sst_win_mean      = nan(nlat, nlon, nwin, nens, 'single');
-% sst_win_var       = nan(nlat, nlon, nwin, nens, 'single');
-%
-% for iens = 1:nens
-%     for iw = 1:nwin
-%         yr_s = (iw-1)*win_size + 1;
-%         yr_e = iw * win_size;
-%
-%         % 差值距平类指数用ano_annual；绝对SST类用sst_annual
-%         idx_win_var_group(iw,iens,1) = std(ano_annual(yr_s:yr_e,iens,1), 'omitnan'); % Nino_EW
-%         idx_win_var_group(iw,iens,2) = std(sst_annual(yr_s:yr_e,iens,2), 'omitnan'); % TNA
-%         idx_win_var_group(iw,iens,3) = std(sst_annual(yr_s:yr_e,iens,3), 'omitnan'); % IOB
-%         idx_win_var_group(iw,iens,4) = std(ano_annual(yr_s:yr_e,iens,4), 'omitnan'); % IOD
-%         idx_win_var_group(iw,iens,5) = std(sst_annual(yr_s:yr_e,iens,5), 'omitnan'); % AMO
-%         idx_win_var_group(iw,iens,6) = std(sst_annual(yr_s:yr_e,iens,6), 'omitnan'); % ATL3
-%         idx_win_var_group(iw,iens,7) = std(ano_annual(yr_s:yr_e,iens,7), 'omitnan'); % SASD
-%         idx_win_var_group(iw,iens,8) = std(sst_annual(yr_s:yr_e,iens,8), 'omitnan'); % Kuroshio
-%
-%         sst_win_mean(:,:,iw,iens) = mean(sst_ano_annual(:,:,yr_s:yr_e,iens), 3, 'omitnan');
-%         sst_win_var(:,:,iw,iens)  = std( sst_ano_annual(:,:,yr_s:yr_e,iens), 0, 3, 'omitnan');
-%     end
-%     fprintf('  ens %d/%d done\n', iens, nens);
-% end
-% clear sst_ano_annual sst_annual ano_annual
-% fprintf('Window stats done.\n');
-%
-% %% ---- (8) 保存窗口统计 --------------------------------------
-% save('WindowStats_VarGroup_8idx_v1.mat', ...
-%      'idx_win_var_group','sst_win_mean','sst_win_var', ...
-%      'idx_names','nwin','nens','n_idx_all', ...
-%      'lat_af','lon_af','win_size','nyear_clim');
-% fprintf('Saved: WindowStats_VarGroup_8idx_v1.mat\n');
-%
-% %% ---- (9) High-Low diff -------------------------------------
-% fprintf('Computing High-Low diffs...\n');
-%
-% sst_mean_diff_all = nan(nlat, nlon, n_idx_all, 'single');
-% sst_var_diff_all  = nan(nlat, nlon, n_idx_all, 'single');
-% sig_mean_diff_all = false(nlat, nlon, n_idx_all);
-% sig_var_diff_all  = false(nlat, nlon, n_idx_all);
-%
-% for i_idx = 1:n_idx_all
-%     fprintf('  %d/%d (%s)...\n', i_idx, n_idx_all, idx_names{i_idx});
-%
-%     idx_vals  = idx_win_var_group(:,:,i_idx);
-%     idx_all   = idx_vals(~isnan(idx_vals(:)));
-%     idx_avg   = mean(idx_all,  'omitnan');
-%     idx_std   = std(idx_all,   'omitnan');
-%     thresh_hi = idx_avg + 0.5*idx_std;
-%     thresh_lw = idx_avg - 0.5*idx_std;
-%     fprintf('    mean=%.4f  std=%.4f  hi>%.4f  lw<%.4f\n', ...
-%             idx_avg, idx_std, thresh_hi, thresh_lw);
-%
-%     hi_mean_samps = []; lw_mean_samps = [];
-%     hi_var_samps  = []; lw_var_samps  = [];
-%
-%     for iens = 1:nens
-%         for iw = 1:nwin
-%             v = idx_win_var_group(iw, iens, i_idx);
-%             if isnan(v); continue; end
-%             if v > thresh_hi
-%                 hi_mean_samps = cat(3, hi_mean_samps, sst_win_mean(:,:,iw,iens));
-%                 hi_var_samps  = cat(3, hi_var_samps,  sst_win_var(:,:,iw,iens));
-%             elseif v < thresh_lw
-%                 lw_mean_samps = cat(3, lw_mean_samps, sst_win_mean(:,:,iw,iens));
-%                 lw_var_samps  = cat(3, lw_var_samps,  sst_win_var(:,:,iw,iens));
-%             end
-%         end
-%     end
-%
-%     n_hi = size(hi_mean_samps, 3);
-%     n_lw = size(lw_mean_samps, 3);
-%     fprintf('    n_hi=%d  n_lw=%d\n', n_hi, n_lw);
-%
-%     hi_d = double(hi_mean_samps); lw_d = double(lw_mean_samps);
-%     sst_mean_diff_all(:,:,i_idx) = single(mean(hi_d,3,'omitnan') - mean(lw_d,3,'omitnan'));
-%
-%     hi_v = double(hi_var_samps);  lw_v = double(lw_var_samps);
-%     sst_var_diff_all(:,:,i_idx)  = single(mean(hi_v,3,'omitnan') - mean(lw_v,3,'omitnan'));
-%
-%     for ilat = 1:nlat
-%         for ilon = 1:nlon
-%             v1 = squeeze(hi_d(ilat,ilon,:)); v1(isnan(v1)) = [];
-%             v2 = squeeze(lw_d(ilat,ilon,:)); v2(isnan(v2)) = [];
-%             if length(v1)>=3 && length(v2)>=3
-%                 [~,p] = ttest2(v1,v2);
-%                 if p<0.05; sig_mean_diff_all(ilat,ilon,i_idx) = true; end
-%             end
-%             v1 = squeeze(hi_v(ilat,ilon,:)); v1(isnan(v1)) = [];
-%             v2 = squeeze(lw_v(ilat,ilon,:)); v2(isnan(v2)) = [];
-%             if length(v1)>=3 && length(v2)>=3
-%                 [~,p] = ttest2(v1,v2);
-%                 if p<0.05; sig_var_diff_all(ilat,ilon,i_idx) = true; end
-%             end
-%         end
-%     end
-% end
-%
-% %% ---- (10) 保存最终结果 -------------------------------------
-% save('GlobalSST_MeanState_Var_8idx_VarGroup_HighLow_v1.mat', ...
-%      'sst_mean_diff_all','sst_var_diff_all', ...
-%      'sig_mean_diff_all','sig_var_diff_all', ...
-%      'idx_names','n_idx_all','lat_af','lon_af');
-% fprintf('Saved: GlobalSST_MeanState_Var_8idx_VarGroup_HighLow_v1.mat\n');
-% fprintf('Computation done.\n');
+clear; clc;
+%% ===== PART 1: COMPUTATION =================================
+%% ---- (1) 加载数据 ------------------------------------------
+load('C:\Users\yingy\Downloads\Data\Paleo3bs_Project\uv_sst_LME_15ens\iLME_full_ts_mme.mat', ...
+     'ts_per_fl','lat_af','lon_af');
+[nlat, nlon, nmon, nens] = size(ts_per_fl);
+nyear = nmon / 12;
+%% ---- (2) 面积权重 ------------------------------------------
+reso_lat = 1.875; reso_lon = 2.5;
+lat_vec = 90 - reso_lat/2 : -reso_lat : -90 + reso_lat/2;
+lon_vec = -180 + reso_lon/2 : reso_lon : 180 - reso_lon/2;
+[~, glat] = meshgrid(lon_vec, lat_vec);
+area_weight = cosd(glat);
+sst_last = squeeze(mean(ts_per_fl(:,:,end,:), 4, 'omitnan'));
+ocean_mask = ~isnan(sst_last);
+area_weight(~ocean_mask) = NaN;
+%% ---- (3) 定义关键区 ----------------------------------------
+regions_raw = {
+    'Nino3.4',  46:51,   5:24;
+    'TNA',      36:46,  51:66;
+    'IOB',      38:70,  89:116;
+    'WTIO',     44:53,  93:100;
+    'ETIO',     49:53, 109:116;
+    'PDO',      11:38, [117:144, 1:9];
+    'AMO',      17:48,  41:72;
+    'ATL3',     47:50,  65:72;
+    'SASD_SW',  64:69,  61:68;
+    'SASD_NE',  57:62,  65:72;
+};
+nreg_raw = size(regions_raw, 1);
+idx_names = {'Nino3.4','TNA','IOB','IOD','PDO','AMO','ATL3','SASD'};
+nreg = length(idx_names);
+%% ---- (4) 各关键区逐月面积加权时间序列 ----------------------
+fprintf('Computing regional monthly series...\n');
+reg_mon_raw = nan(nmon, nens, nreg_raw);
+for ireg = 1:nreg_raw
+    lat_idx = regions_raw{ireg, 2};
+    lon_idx = regions_raw{ireg, 3};
+    w       = area_weight(lat_idx, lon_idx);
+    w_sum   = nansum(w(:));
+    for iens = 1:nens
+        for im = 1:nmon
+            slab = double(ts_per_fl(lat_idx, lon_idx, im, iens));
+            reg_mon_raw(im, iens, ireg) = nansum(slab(:) .* w(:)) / w_sum;
+        end
+    end
+    fprintf('  %d/%d (%s) done\n', ireg, nreg_raw, regions_raw{ireg,1});
+end
+%% ---- (5) 矩阵运算去除季节循环（基于850-1850气候态）--------
+reg_mon_re   = reshape(reg_mon_raw, 12, nyear, nens, nreg_raw);
+reg_clim     = nanmean(reg_mon_re(:, 1:1001, :, :), 2);
+reg_clim_rep = repmat(reg_clim, 1, nyear, 1, 1);
+reg_ano_re   = reg_mon_re - reg_clim_rep;
+% 年均距平 [nyear x nens x nreg_raw] — 用于variability计算
+reg_ano_annual_raw = squeeze(nanmean(reg_ano_re, 1));
+% 年均绝对SST [nyear x nens x nreg_raw]
+reg_sst_annual_raw = squeeze(nanmean(reg_mon_re, 1));
+clear reg_mon_raw reg_mon_re reg_clim reg_clim_rep reg_ano_re
+fprintf('Regional anomalies done.\n');
+%% ---- (5b) 合并IOD和SASD ------------------------------------
+reg_ano_annual = nan(nyear, nens, nreg);
+reg_sst_annual = nan(nyear, nens, nreg);   % 绝对SST（差值型指数=距平差值）
+for k = 1:3
+    reg_ano_annual(:,:,k) = reg_ano_annual_raw(:,:,k);
+    reg_sst_annual(:,:,k) = reg_sst_annual_raw(:,:,k);
+end
+% IOD = WTIO(4) - ETIO(5)，用距平差值（偶极子强度，无绝对量意义）
+reg_ano_annual(:,:,4) = reg_ano_annual_raw(:,:,4) - reg_ano_annual_raw(:,:,5);
+reg_sst_annual(:,:,4) = reg_ano_annual_raw(:,:,4) - reg_ano_annual_raw(:,:,5);
+% PDO(6)->5, AMO(7)->6, ATL3(8)->7
+for k = 5:7
+    reg_ano_annual(:,:,k) = reg_ano_annual_raw(:,:,k+1);
+    reg_sst_annual(:,:,k) = reg_sst_annual_raw(:,:,k+1);
+end
+% SASD = SW(9) - NE(10)，用距平差值（偶极子强度，无绝对量意义）
+reg_ano_annual(:,:,8) = reg_ano_annual_raw(:,:,9) - reg_ano_annual_raw(:,:,10);
+reg_sst_annual(:,:,8) = reg_ano_annual_raw(:,:,9) - reg_ano_annual_raw(:,:,10);
+clear reg_ano_annual_raw reg_sst_annual_raw
+% 说明：reg_clim 对每个(iens,ireg)在窗口内是常数，减去常数不改变std，
+% 所以 std(reg_sst_annual) 与 std(reg_ano_annual) 在任意窗口内完全等价，
+% 用 reg_sst_annual 统一计算每个指数的窗口内variability即可。
+%% ---- (6) 全局SST年均距平（基于850-1850气候态）-------------
+fprintf('Computing global SST anomalies...\n');
+sst_mon_re   = reshape(ts_per_fl, nlat, nlon, 12, nyear, nens);
+sst_clim     = nanmean(sst_mon_re(:,:,:,1:1001,:), 4);
+sst_clim_rep = repmat(sst_clim, 1, 1, 1, nyear, 1);
+sst_ano_re   = sst_mon_re - sst_clim_rep;
+clear ts_per_fl sst_mon_re sst_clim sst_clim_rep
+sst_ano_annual = squeeze(nanmean(sst_ano_re, 3));   % [nlat x nlon x nyear x nens]
+clear sst_ano_re
+fprintf('Global SST anomalies done.\n');
+%% ---- (7) Non-overlapping 31yr 窗口 -------------------------
+% 每个窗口同时算出：
+%   reg_win_var  — 每个指数自身在该窗口内的variability（std），用于分组
+%   sst_win_mean — 全局SST在该窗口内的mean state（距平均值）
+%   sst_win_var  — 全局SST在该窗口内的variability（距平std）
+nyear_clim = 1001;
+win_size   = 31;
+nwin       = floor(nyear_clim / win_size);
+fprintf('Non-overlapping windows: %d\n', nwin);
+reg_win_var  = nan(nwin, nens, nreg);
+sst_win_mean = nan(nlat, nlon, nwin, nens, 'single');
+sst_win_var  = nan(nlat, nlon, nwin, nens, 'single');
+for iens = 1:nens
+    for iw = 1:nwin
+        yr_s = (iw-1)*win_size + 1;
+        yr_e = iw * win_size;
+        for ireg = 1:nreg
+            % 分组依据：该指数自身在这个31yr窗口内的variability(std)
+            reg_win_var(iw, iens, ireg) = std(reg_sst_annual(yr_s:yr_e, iens, ireg), 'omitnan');
+        end
+        sst_win_mean(:,:,iw,iens) = mean(sst_ano_annual(:,:,yr_s:yr_e,iens), 3, 'omitnan');
+        sst_win_var(:,:,iw,iens)  = std( sst_ano_annual(:,:,yr_s:yr_e,iens), 0, 3, 'omitnan');
+    end
+    fprintf('  ens %d/%d done\n', iens, nens);
+end
+clear sst_ano_annual reg_ano_annual reg_sst_annual
+%% ---- (8) 对每个关键区计算 High-Low VARIABILITY 分组下的
+%          全球SST mean state / variability diff -------------
+fprintf('Computing High-Low (by variability) diffs...\n');
+sst_mean_diff_all = nan(nlat, nlon, nreg, 'single');
+sst_var_diff_all  = nan(nlat, nlon, nreg, 'single');
+sig_mean_diff_all = false(nlat, nlon, nreg);
+sig_var_diff_all  = false(nlat, nlon, nreg);
+for ireg = 1:nreg
+    fprintf('  Region %d/%d (%s)...\n', ireg, nreg, idx_names{ireg});
+    idx_vals  = reg_win_var(:,:,ireg);
+    idx_all   = idx_vals(~isnan(idx_vals(:)));
+    idx_avg   = mean(idx_all, 'omitnan');
+    idx_std   = std(idx_all,  'omitnan');
+    thresh_hi = idx_avg + 0.5*idx_std;
+    thresh_lw = idx_avg - 0.5*idx_std;
+    fprintf('    mean=%.4f std=%.4f hi>%.4f lw<%.4f\n', ...
+            idx_avg, idx_std, thresh_hi, thresh_lw);
+
+    hi_mean_samps = []; lw_mean_samps = [];
+    hi_var_samps  = []; lw_var_samps  = [];
+    for iens = 1:nens
+        for iw = 1:nwin
+            v = reg_win_var(iw, iens, ireg);
+            if isnan(v); continue; end
+            if v > thresh_hi
+                hi_mean_samps = cat(3, hi_mean_samps, sst_win_mean(:,:,iw,iens));
+                hi_var_samps  = cat(3, hi_var_samps,  sst_win_var(:,:,iw,iens));
+            elseif v < thresh_lw
+                lw_mean_samps = cat(3, lw_mean_samps, sst_win_mean(:,:,iw,iens));
+                lw_var_samps  = cat(3, lw_var_samps,  sst_win_var(:,:,iw,iens));
+            end
+        end
+    end
+    n_hi = size(hi_mean_samps, 3);
+    n_lw = size(lw_mean_samps, 3);
+    fprintf('    n_hi=%d  n_lw=%d\n', n_hi, n_lw);
+
+    hi_md = double(hi_mean_samps); lw_md = double(lw_mean_samps);
+    sst_mean_diff_all(:,:,ireg) = single(mean(hi_md,3,'omitnan') - mean(lw_md,3,'omitnan'));
+
+    hi_vd = double(hi_var_samps);  lw_vd = double(lw_var_samps);
+    sst_var_diff_all(:,:,ireg)  = single(mean(hi_vd,3,'omitnan') - mean(lw_vd,3,'omitnan'));
+
+    % 显著性：ttest2
+    for ilat = 1:nlat
+        for ilon = 1:nlon
+            v1 = squeeze(hi_md(ilat,ilon,:)); v1(isnan(v1)) = [];
+            v2 = squeeze(lw_md(ilat,ilon,:)); v2(isnan(v2)) = [];
+            if length(v1)>=3 && length(v2)>=3
+                [~,p] = ttest2(v1,v2);
+                if p < 0.05; sig_mean_diff_all(ilat,ilon,ireg) = true; end
+            end
+            v1 = squeeze(hi_vd(ilat,ilon,:)); v1(isnan(v1)) = [];
+            v2 = squeeze(lw_vd(ilat,ilon,:)); v2(isnan(v2)) = [];
+            if length(v1)>=3 && length(v2)>=3
+                [~,p] = ttest2(v1,v2);
+                if p < 0.05; sig_var_diff_all(ilat,ilon,ireg) = true; end
+            end
+        end
+    end
+end
+save('GlobalSST_MeanState_Var_AllRegions_HighLow_v2.mat', ...
+     'sst_mean_diff_all','sst_var_diff_all', ...
+     'sig_mean_diff_all','sig_var_diff_all', ...
+     'idx_names','nreg','lat_af','lon_af');
+fprintf('Saved: GlobalSST_MeanState_Var_AllRegions_HighLow_v2.mat\n');
+fprintf('Computation done.\n');
 
 %% ===== PART 2: PLOTTING ====================================
 clear; clc;
-load('GlobalSST_MeanState_Var_8idx_VarGroup_HighLow_v1.mat');
+load('GlobalSST_MeanState_Var_AllRegions_HighLow_v2.mat');
 load('BlueWhiteOrangeRed.mat');
 cmap_use  = BlueWhiteOrangeRed;
-n_idx     = length(idx_names);   % = 8
+n_idx     = length(idx_names);   % = 8, 顺序须与 idx_names 完全一致：
+                                  % Nino3.4, TNA, IOB, IOD, PDO, AMO, ATL3, SASD
 %% ---- Grid -------------------------------------------------
 lon_orig = lon_af(:)';
 lat_orig = lat_af(:)';
@@ -309,23 +265,19 @@ epsw   = 0.06;   % 列间距（归一化）
 epsh   = 0.03;   % 行间距（归一化）
 % panel归一化宽度
 width = (1 - xstart - 0.03 - epsw) / ncol;
-% panel高度：严格按 lat_range/lon_range * (归一化宽度对应的实际度数比)
-% 等距投影下，panel的高宽比 = lat_range / lon_range = 120/360
+% panel高度：严格按 lat_range/lon_range 等距比例，保证地图不失真
 lat_range = lat_max - lat_min;   % 120
 lon_range = 360;
-% 实际cm宽
 panel_cm_w = page_width * width;
-panel_cm_h = panel_cm_w * (lat_range / lon_range);   % 严格1:3比例，保证地图不失真
+panel_cm_h = panel_cm_w * (lat_range / lon_range);
 % ---- 页面长宽比 1:1.5（page_height = page_width * 1.5）----
 cb_area_cm   = 1.5;    % 色标区域高度(cm)
-top_margin   = 1;      % 顶部标题区(cm)：标题/第一行离画布顶端的距离，保持1cm
+top_margin   = 1;      % 顶部标题区(cm)
 bottom_margin= 0.8;    % 底部基础边距(cm)
-% 按真实经纬度比例，8个panel+行间距+色标+上下边距实际需要多高
 min_needed_height = nrow * panel_cm_h + (nrow-1) * epsh * page_width + ...
                      cb_area_cm + top_margin + bottom_margin;
 page_height = page_width * 1.5;   % 目标：宽:高 = 1:1.5
-% 目标高度比实际需要的多出来的空间，为了不重新出现"顶部一大块空白"的问题，
-% 保持地图真实比例不变，把这部分多余空间全部放到底部（增大 bottom_margin）
+% 多余空间全部放到底部（增大 bottom_margin），保持地图真实比例不变
 extra_h       = max(page_height - min_needed_height, 0);
 bottom_margin = bottom_margin + extra_h;
 % 归一化高度
@@ -337,7 +289,6 @@ cb_bot_norm  = (bottom_margin - 0.3) / page_height;
 cb_gap_norm  = 0.008;
 cb_w         = width * ncol + epsw;
 cb_pos       = [xstart, cb_bot_norm, cb_w, cb_h_norm];
-% ystart：最下行panel底边
 ystart_norm  = cb_bot_norm + cb_h_norm + cb_gap_norm * 3;
 % panel位置（从下到上：r=4是第1行显示，r=1是最后行）
 pos = zeros(nrow*ncol, 4);
@@ -349,19 +300,21 @@ for r = 1:nrow
         pos((r-1)*ncol+c, 4) = height_norm;
     end
 end
-% panel标签（不含~，使用Interpreter none）
-panel_labels = {'(a) Nino',      '(b) TNA', ...
-                 '(c) IOB',       '(d) IOD', ...
-                 '(e) AMO',       '(f) Atl Nino', ...
-                 '(g) SASD',      '(h) Kuroshio'};
+% ---- panel标签：顺序须与 idx_names 一一对应 -----------------
+% idx_names = {'Nino3.4','TNA','IOB','IOD','PDO','AMO','ATL3','SASD'}
+panel_labels = {'(a) Nino3.4', '(b) TNA', ...
+                 '(c) IOB',     '(d) IOD', ...
+                 '(e) PDO',     '(f) AMO', ...
+                 '(g) ATL3',    '(h) SASD'};
+assert(isequal(idx_names, {'Nino3.4','TNA','IOB','IOD','PDO','AMO','ATL3','SASD'}), ...
+       'idx_names 顺序与 panel_labels 不一致，请检查 GlobalSST_MeanState_Var_AllRegions_HighLow_v2.mat！');
 %% ============================================================
-%  图1：高variability 减 低variability 时期 → 全球SST Mean State diff
+%  图1：Mean State diff（High minus Low VARIABILITY epoch 的 ΔSST 距平）
 %% ============================================================
 hfig1 = figure('Units','centimeters', ...
     'Position',[0 0 page_width page_height], ...
     'PaperPosition',[0 0 page_width page_height], ...
     'Color',[1 1 1]);
-% 总标题
 top_y = pos(1,2) + height_norm + epsh_norm * 0.3;
 annotation('textbox',[xstart, top_y, cb_w, 0.06], ...
     'String','High minus Low Variability Period — \DeltaSST Mean State', ...
@@ -381,7 +334,7 @@ for ip = 1:n_idx
                xtick_vals_pc, xtick_labels, ytick_labels, show_xlab, ...
                white_rgb, grey_rgb, green_rgb, nlat_sub, ...
                dot_lat_gidx, dot_lon_pc_idx, dot_lat_vec, nlon, S);
-    % ---- 标签改画在panel方框正上方（而不是方框内左上角）----
+    % ---- 标签画在panel方框正上方，顺序对应 idx_names{ip} ----
     annotation(hfig1, 'textbox', ...
                [pos(ip,1), ...
                 pos(ip,2) + height_norm + 0.003, ...
@@ -393,19 +346,18 @@ for ip = 1:n_idx
         'FitBoxToText','off','Interpreter','none');
     axes('Position',ax.Position,'box','on','ytick',[],'xtick',[],'color','none');
 end
-% 色标
 ax_cb1 = axes('Position',[0 0 1 1], 'Visible','off');
 colormap(ax_cb1, cmap_use);
 caxis(ax_cb1, clim_mean);
 cb1 = colorbar(ax_cb1, 'Location','southoutside', 'Position', cb_pos);
 set(cb1, 'Ticks',-0.3:0.1:0.3, 'TickLength',0.003, ...
     'FontSize',10, 'FontName','Helvetica', 'LineWidth',0.8);
-xlabel(cb1, '\DeltaSST mean state (^{\circ}C)', ...
+xlabel(cb1, '\DeltaSST anomaly (^{\circ}C)', ...
     'FontName','Helvetica', 'FontSize',10);
-print(hfig1, '-dtiff', '-r600', './GlobalSST_MeanState_8idx_VarGroup_HighLow_v1.tif');
-fprintf('Saved: GlobalSST_MeanState_8idx_VarGroup_HighLow_v1.tif\n');
+print(hfig1, '-dtiff', '-r600', './GlobalSST_MeanState_AllRegions_HighLow_v2.tif');
+fprintf('Saved: GlobalSST_MeanState_AllRegions_HighLow_v2.tif\n');
 %% ============================================================
-%  图2：高variability 减 低variability 时期 → 全球SST Variability diff
+%  图2：Variability diff（High minus Low VARIABILITY epoch 的 ΔSST std）
 %% ============================================================
 hfig2 = figure('Units','centimeters', ...
     'Position',[0 0 page_width page_height], ...
@@ -430,7 +382,7 @@ for ip = 1:n_idx
                xtick_vals_pc, xtick_labels, ytick_labels, show_xlab, ...
                white_rgb, grey_rgb, green_rgb, nlat_sub, ...
                dot_lat_gidx, dot_lon_pc_idx, dot_lat_vec, nlon, S);
-    % ---- 标签改画在panel方框正上方（而不是方框内左上角）----
+    % ---- 标签画在panel方框正上方，顺序对应 idx_names{ip} ----
     annotation(hfig2, 'textbox', ...
                [pos(ip,1), ...
                 pos(ip,2) + height_norm + 0.003, ...
@@ -450,8 +402,8 @@ set(cb2, 'Ticks',-0.15:0.05:0.15, 'TickLength',0.003, ...
     'FontSize',10, 'FontName','Helvetica', 'LineWidth',0.8);
 xlabel(cb2, '\DeltaSST variability (^{\circ}C)', ...
     'FontName','Helvetica', 'FontSize',10);
-print(hfig2, '-dtiff', '-r600', './GlobalSST_Var_8idx_VarGroup_HighLow_v1.tif');
-fprintf('Saved: GlobalSST_Var_8idx_VarGroup_HighLow_v1.tif\n');
+print(hfig2, '-dtiff', '-r600', './GlobalSST_Var_AllRegions_HighLow_v4.tif');
+fprintf('Saved: GlobalSST_Var_AllRegions_HighLow_v4.tif\n');
 %% =========================================================
 %  LOCAL FUNCTION
 %% =========================================================
