@@ -1,0 +1,526 @@
+%% =========================================================
+%  Compute seasonal SST VARIABILITY composites
+%  (std over 31-yr window) for High/Low ENSO-TNA periods
+%  + significance + plotting (same as SST mean version)
+% =========================================================
+clear; clc;
+
+%% ===== PART 1: COMPUTATION =================================
+
+%% ---- (1) Load Granger causality ---------------------------
+load('Granger_NINOTNA_30yr.mat');
+R_Nino2TNA = F21;   % [1156 x 15]
+clear F21 sig21
+
+%% ---- (2) Load SST -----------------------------------------
+load('C:\Users\yingy\Downloads\Data\Paleo3bs_Project\uv_sst_LME_15ens\iLME_full_ts_mme.mat', ...
+     'ts_per_fl','lat_af','lon_af');
+[nlat, nlon, nmon, nens] = size(ts_per_fl);
+nyear = nmon / 12;
+
+%% ---- (3) Climatology (850-1850, first 12012 months) -------
+n_clim_mon = 1001 * 12;
+fprintf('Computing climatology...\n');
+clim_sst = nan(nlat, nlon, 12);
+for im = 1:12
+    mon_idx = im : 12 : n_clim_mon;
+    clim_sst(:,:,im) = mean(mean(ts_per_fl(:,:,mon_idx,:), 3, 'omitnan'), 4, 'omitnan');
+end
+
+%% ---- (4) Monthly anomaly ----------------------------------
+fprintf('Computing monthly SST anomalies...\n');
+sst_ano = nan(nlat, nlon, nmon, nens, 'single');
+for iens = 1:nens
+    fprintf('  ens %d/%d\n', iens, nens);
+    for im = 1:12
+        mon_idx = im : 12 : nmon;
+        sst_ano(:,:,mon_idx,iens) = bsxfun(@minus, ...
+            single(ts_per_fl(:,:,mon_idx,iens)), single(clim_sst(:,:,im)));
+    end
+end
+clear ts_per_fl clim_sst
+
+%% ---- (5) Seasonal anomaly per year ------------------------
+fprintf('Computing seasonal anomalies...\n');
+nseas = 5;
+season_names = {'DJF','MAM','JJA','SON','ANN'};
+sst_seas = nan(nlat, nlon, nyear, nens, nseas, 'single');
+for iens = 1:nens
+    for iyr = 1:nyear
+        m1 = (iyr-1)*12 + 1;
+        sst_seas(:,:,iyr,iens,5) = mean(sst_ano(:,:,m1:m1+11,iens),   3,'omitnan');
+        sst_seas(:,:,iyr,iens,2) = mean(sst_ano(:,:,m1+2:m1+4,iens),  3,'omitnan');
+        sst_seas(:,:,iyr,iens,3) = mean(sst_ano(:,:,m1+5:m1+7,iens),  3,'omitnan');
+        sst_seas(:,:,iyr,iens,4) = mean(sst_ano(:,:,m1+8:m1+10,iens), 3,'omitnan');
+        if iyr == 1
+            sst_seas(:,:,iyr,iens,1) = NaN;
+        else
+            dec_prev = m1 - 1;
+            sst_seas(:,:,iyr,iens,1) = mean(sst_ano(:,:,[dec_prev,m1,m1+1],iens),3,'omitnan');
+        end
+    end
+end
+clear sst_ano
+
+%% ---- (6) Window centres -----------------------------------
+win_centers = 16 : 31 : 985;
+nwin = length(win_centers);
+
+%% ---- (7) Granger at window centres ------------------------
+G_point = nan(nwin, nens);
+for iens = 1:nens
+    G_point(:,iens) = R_Nino2TNA(win_centers, iens);
+end
+
+%% ---- (8) Thresholds ---------------------------------------
+G_all     = G_point(:); G_all(isnan(G_all)) = [];
+G_avg     = mean(G_all,'omitnan');
+G_std     = std(G_all, 'omitnan');
+thresh_hi = G_avg + 0.5*G_std;
+thresh_lw = G_avg - 0.5*G_std;
+fprintf('Granger mean=%.4f std=%.4f hi>%.4f lw<%.4f\n',G_avg,G_std,thresh_hi,thresh_lw);
+
+%% ---- (9) Pre-count ----------------------------------------
+n_hi_pre = 0; n_lw_pre = 0;
+for iens = 1:nens
+    for iw = 1:nwin
+        ic = win_centers(iw);
+        gval = R_Nino2TNA(ic,iens);
+        if isnan(gval); continue; end
+        yr_s = ic-15; yr_e = ic+15;
+        if yr_s<1||yr_e>nyear; continue; end
+        if     gval>thresh_hi; n_hi_pre=n_hi_pre+1;
+        elseif gval<thresh_lw; n_lw_pre=n_lw_pre+1; end
+    end
+end
+
+%% ---- (10) Collect per-window SST VARIABILITY (std) --------
+%  KEY CHANGE: instead of the 31-yr mean, compute std over the 31-yr window
+%  This gives the SST variability within each 31-yr period.
+fprintf('Collecting window variability samples...\n');
+sst_hi_samples = nan(nlat,nlon,nseas,n_hi_pre,'single');
+sst_lw_samples = nan(nlat,nlon,nseas,n_lw_pre,'single');
+hi_ens_id = nan(n_hi_pre,1);
+lw_ens_id = nan(n_lw_pre,1);
+idx_hi=0; idx_lw=0;
+
+for iens = 1:nens
+    for iw = 1:nwin
+        ic = win_centers(iw);
+        gval = R_Nino2TNA(ic,iens);
+        if isnan(gval); continue; end
+        yr_s=ic-15; yr_e=ic+15;
+        if yr_s<1||yr_e>nyear; continue; end
+
+        % STD over the 31-yr window (dim 3 = year dimension)
+        % sst_seas: [nlat x nlon x nyear x nens x nseas]
+        win_var = squeeze(std(sst_seas(:,:,yr_s:yr_e,iens,:),0,3,'omitnan'));
+        % win_var: [nlat x nlon x nseas]
+
+        if gval>thresh_hi
+            idx_hi=idx_hi+1;
+            sst_hi_samples(:,:,:,idx_hi)=win_var;
+            hi_ens_id(idx_hi)=iens;
+        elseif gval<thresh_lw
+            idx_lw=idx_lw+1;
+            sst_lw_samples(:,:,:,idx_lw)=win_var;
+            lw_ens_id(idx_lw)=iens;
+        end
+    end
+end
+n_hi=idx_hi; n_lw=idx_lw;
+fprintf('n_hi=%d  n_lw=%d\n',n_hi,n_lw);
+
+%% ---- (11) Composite means of variability ------------------
+%  Average the 31-yr std values across all hi/lw windows
+sst_hi_mean = squeeze(mean(sst_hi_samples(:,:,:,1:n_hi),4,'omitnan'));
+sst_lw_mean = squeeze(mean(sst_lw_samples(:,:,:,1:n_lw),4,'omitnan'));
+sst_diff    = sst_hi_mean - sst_lw_mean;
+
+%% ---- (12) Significance: Hi/Lw (t-test + 75% ens sign) ----
+%  t-test: each window's std value vs zero (one-sample)
+%  Sign consistency: >= 75% ensemble members agree on sign of composite
+fprintf('Significance Hi/Lw...\n');
+sig_hi = false(nlat,nlon,nseas);
+sig_lw = false(nlat,nlon,nseas);
+for iseas = 1:nseas
+    hi_d = double(sst_hi_samples(:,:,iseas,1:n_hi));
+    lw_d = double(sst_lw_samples(:,:,iseas,1:n_lw));
+    hi_cm = mean(hi_d,4,'omitnan');
+    lw_cm = mean(lw_d,4,'omitnan');
+    for ilat = 1:nlat
+        for ilon = 1:nlon
+            % Hi
+            v=squeeze(hi_d(ilat,ilon,:)); v(isnan(v))=[];
+            if length(v)>=3
+                [~,p]=ttest(v);
+                em=nan(nens,1);
+                for ie=1:nens
+                    idx_e=find(hi_ens_id(1:n_hi)==ie);
+                    if ~isempty(idx_e)
+                        em(ie)=mean(squeeze(hi_d(ilat,ilon,idx_e)),'omitnan');
+                    end
+                end
+                em(isnan(em))=[];
+                if ~isempty(em) && p<0.05 && mean(sign(em)==sign(hi_cm(ilat,ilon)))>=0.75
+                    sig_hi(ilat,ilon,iseas)=true;
+                end
+            end
+            % Lw
+            v=squeeze(lw_d(ilat,ilon,:)); v(isnan(v))=[];
+            if length(v)>=3
+                [~,p]=ttest(v);
+                em=nan(nens,1);
+                for ie=1:nens
+                    idx_e=find(lw_ens_id(1:n_lw)==ie);
+                    if ~isempty(idx_e)
+                        em(ie)=mean(squeeze(lw_d(ilat,ilon,idx_e)),'omitnan');
+                    end
+                end
+                em(isnan(em))=[];
+                if ~isempty(em) && p<0.05 && mean(sign(em)==sign(lw_cm(ilat,ilon)))>=0.75
+                    sig_lw(ilat,ilon,iseas)=true;
+                end
+            end
+        end
+    end
+    fprintf('  Hi/Lw season %d/%d done\n',iseas,nseas);
+end
+
+%% ---- (13) Significance: Diff (ttest2) ---------------------
+fprintf('Significance Diff...\n');
+sig_diff = false(nlat,nlon,nseas);
+for iseas = 1:nseas
+    hi_d = double(sst_hi_samples(:,:,iseas,1:n_hi));
+    lw_d = double(sst_lw_samples(:,:,iseas,1:n_lw));
+    for ilat = 1:nlat
+        for ilon = 1:nlon
+            v1=squeeze(hi_d(ilat,ilon,:)); v1(isnan(v1))=[];
+            v2=squeeze(lw_d(ilat,ilon,:)); v2(isnan(v2))=[];
+            if length(v1)<3||length(v2)<3; continue; end
+            [~,p]=ttest2(v1,v2);
+            if p<0.05; sig_diff(ilat,ilon,iseas)=true; end
+        end
+    end
+    fprintf('  Diff season %d/%d done\n',iseas,nseas);
+end
+
+%% ---- (14) Save --------------------------------------------
+save('GlobalSST_Variability_HighLow_GrangerNinoTNA_seasonal_v1.mat', ...
+     'sst_hi_mean','sst_lw_mean','sst_diff', ...
+     'sig_hi','sig_lw','sig_diff', ...
+     'lat_af','lon_af','season_names','n_hi','n_lw','thresh_hi','thresh_lw');
+fprintf('Computation done.\n');
+
+%% ===== PART 2: PLOTTING ====================================
+clear; clc;
+
+%% ---- Load data --------------------------------------------
+load('GlobalSST_Variability_HighLow_GrangerNinoTNA_seasonal_v1.mat');
+load('BlueWhiteOrangeRed.mat');
+cmap_use = BlueWhiteOrangeRed;
+
+%% ---- Grid -------------------------------------------------
+lon_orig = lon_af(:)';
+lat_orig = lat_af(:)';
+nlon     = length(lon_orig);
+
+%% ---- Pacific-centered (seam at 20E) -----------------------
+lon_cut = 20;
+idx_R   = find(lon_orig >= lon_cut);
+idx_L   = find(lon_orig <  lon_cut);
+lon_pc  = [lon_orig(idx_R), lon_orig(idx_L)+360];
+reorder = @(F) F(:,[idx_R, idx_L]);
+
+%% ---- Land mask --------------------------------------------
+fprintf('Building land mask...\n');
+shp_path = 'C:\Users\yingy\Downloads\D\FengYingying\FengYingyingData\MapData\GLOBALSHP\ContinentsPoly.shp';
+S = shaperead(shp_path, 'UseGeoCoords', true);
+[LON_orig, LAT_orig] = meshgrid(lon_orig, lat_orig);
+land_orig = false(size(LON_orig));
+for ipoly = 1:length(S)
+    px = S(ipoly).Lon(:); py = S(ipoly).Lat(:);
+    if isempty(px); continue; end
+    nan_idx = find(isnan(px)); nan_idx = nan_idx(:);
+    seg_s = [1; nan_idx+1]; seg_e = [nan_idx-1; length(px)];
+    for iseg = 1:length(seg_s)
+        s = seg_s(iseg); e = seg_e(iseg);
+        if e-s < 2; continue; end
+        in = inpolygon(LON_orig(:), LAT_orig(:), px(s:e), py(s:e));
+        land_orig = land_orig | reshape(in, size(LON_orig));
+    end
+end
+fprintf('Land mask done.\n');
+
+%% ---- Lat restriction --------------------------------------
+lat_min = -60; lat_max = 60;
+lat_idx = lat_orig >= lat_min & lat_orig <= lat_max;
+lat_use = lat_orig(lat_idx);
+nlat_sub = sum(lat_idx);
+
+%% ---- Significance dot grid (every 5 deg) ------------------
+dot_lons_base = lon_cut:5:lon_cut+355;
+dot_lats_base = lat_min:5:lat_max;
+[dLON, dLAT]  = meshgrid(dot_lons_base, dot_lats_base);
+dot_lon_pc_vec = dLON(:);
+dot_lat_vec    = dLAT(:);
+dot_lat_gidx   = nan(size(dot_lat_vec));
+dot_lon_pc_idx = nan(size(dot_lon_pc_vec));
+for k = 1:length(dot_lat_vec)
+    [~, dot_lat_gidx(k)]   = min(abs(lat_use - dot_lat_vec(k)));
+    [~, dot_lon_pc_idx(k)] = min(abs(lon_pc  - dot_lon_pc_vec(k)));
+end
+
+%% ---- X tick labels ----------------------------------------
+xtick_vals_pc = [60, 120, 180, 240, 300];
+xtick_labels  = {'60°E','120°E','180°','120°W','60°W'};
+
+%% ---- Common style -----------------------------------------
+grey_rgb  = [0.65 0.65 0.65];
+green_rgb = [0.0  0.55 0.0 ];
+% Variability is always positive; Hi/Lw panels use [0, max]
+% Diff panel (hi-lw) can be negative; use symmetric range
+clim_hl   = [0.0   0.60];   % adjust if needed after first run
+clim_dfc  = [-0.15 0.15];   % adjust if needed after first run
+
+%% ===================================================
+%  FIG 1-3: Seasonal (DJF/MAM/JJA/SON), 4 rows x 1 col
+%% ===================================================
+season_labels = {'DJF','MAM','JJA','SON'};
+nrow_seas = 4;
+
+page_width4  = 20;
+page_height4 = 24;
+nrow = 4; ncol = 1;
+width  = 0.40;
+height = width / 3.0;
+epsw   = 0.0;
+epsh   = 0.04;
+xstart = 0.12;
+ystart = 0.16;
+
+pos4 = zeros(nrow*ncol, 4);
+for r = 1:nrow
+    for c = 1:ncol
+        pos4((r-1)*ncol+c, 1) = xstart + (c-1)*(width+epsw);
+        pos4((r-1)*ncol+c, 2) = 1 - (ystart + r*height + (r-1)*epsh);
+        pos4((r-1)*ncol+c, 3) = width;
+        pos4((r-1)*ncol+c, 4) = height;
+    end
+end
+cb_pos4 = [xstart, 0.11, width, 0.018];
+
+fig_data_raw = {sst_hi_mean, sst_lw_mean, sst_diff};
+fig_sig_raw  = {sig_hi,      sig_lw,      sig_diff};
+fig_titles4  = {'High ENSO\rightarrowTNA — SST Variability', ...
+                'Low ENSO\rightarrowTNA — SST Variability', ...
+                'Difference: High minus Low (SST Variability)'};
+fig_fnames4  = {'GlobalSST_Var_Hi_v1.tif','GlobalSST_Var_Lw_v1.tif','GlobalSST_Var_Diff_v1.tif'};
+cb_labels4   = {'SST variability (°C)','SST variability (°C)','\DeltaSST variability (°C)'};
+
+for ifig = 1:3
+    clim_use = clim_hl; if ifig == 3; clim_use = clim_dfc; end
+
+    hfig = figure('Units','centimeters', ...
+                  'Position',[0 0 page_width4 page_height4], ...
+                  'PaperPosition',[0 0 page_width4 page_height4], ...
+                  'Color',[1 1 1]);
+
+    suptitle_y4 = pos4(1,2) + height + 0.04;
+    annotation('textbox',[xstart, suptitle_y4, width, 0.05], ...
+               'String',fig_titles4{ifig}, ...
+               'FontName','Helvetica','FontSize',14,'FontWeight','bold', ...
+               'Color','k','HorizontalAlignment','center', ...
+               'VerticalAlignment','bottom','EdgeColor','none','FitBoxToText','off');
+
+    for ip = 1:nrow_seas
+        dat_pc  = reorder(fig_data_raw{ifig}(lat_idx,:,ip));
+        sig_pc  = reorder(fig_sig_raw{ifig}(lat_idx,:,ip));
+        land_pc = reorder(land_orig(lat_idx,:));
+
+        ax = axes('Position', pos4(ip,:), 'Color', grey_rgb);
+        draw_panel(ax, dat_pc, sig_pc, land_pc, lon_pc, lat_use, ...
+                   clim_use, cmap_use, lon_cut, lat_min, lat_max, ...
+                   xtick_vals_pc, xtick_labels, ip==nrow_seas, ...
+                   grey_rgb, green_rgb, nlat_sub, ...
+                   dot_lat_gidx, dot_lon_pc_idx, dot_lat_vec, nlon, S);
+
+        annotation(hfig,'textbox', ...
+                   [xstart-0.01, pos4(ip,2)+height+0.002, 0.20, 0.025], ...
+                   'String',sprintf('(%s) %s', char('a'+ip-1), season_labels{ip}), ...
+                   'FontName','Helvetica','FontSize',11,'FontWeight','normal', ...
+                   'Color','k','HorizontalAlignment','left', ...
+                   'VerticalAlignment','top','EdgeColor','none','FitBoxToText','off');
+
+        axes('Position',ax.Position,'box','on','ytick',[],'xtick',[],'color','none');
+    end
+
+    ax_last = axes('Position',pos4(nrow_seas,:),'Visible','off');
+    colormap(ax_last, cmap_use); caxis(ax_last, clim_use);
+    cb = colorbar(ax_last,'Location','southoutside','Position',cb_pos4);
+    if ifig < 3
+        set(cb,'Ticks',0:0.1:0.6,'TickLength',0.005/width,'FontSize',10,'FontName','Helvetica','LineWidth',0.8);
+    else
+        set(cb,'Ticks',-0.15:0.05:0.15,'TickLength',0.005/width,'FontSize',10,'FontName','Helvetica','LineWidth',0.8);
+    end
+    cb_ax2 = axes('Position',cb.Position,'Visible','off');
+    text(cb_ax2, 0.5, -3.5, cb_labels4{ifig}, ...
+         'FontName','Helvetica','FontSize',10, ...
+         'HorizontalAlignment','center','Units','normalized');
+
+    print(hfig,'-dtiff','-r600',fig_fnames4{ifig});
+    fprintf('Saved: %s\n',fig_fnames4{ifig});
+end
+
+%% ===================================================
+%  FIG 4: Combined High/Low/Diff, Annual mean variability
+%% ===================================================
+iseas_ann = 5;
+
+page_width3  = 20;
+page_height3 = 20;
+nrow3  = 3; ncol3 = 1;
+width3  = 0.40;
+height3 = width3 / 3.0;
+epsw3   = 0.0;
+epsh3   = 0.04;
+xstart3 = 0.12;
+ystart3 = 0.26;
+
+pos3 = zeros(nrow3*ncol3, 4);
+for r = 1:nrow3
+    for c = 1:ncol3
+        pos3((r-1)*ncol3+c, 1) = xstart3 + (c-1)*(width3+epsw3);
+        pos3((r-1)*ncol3+c, 2) = 1 - (ystart3 + r*height3 + (r-1)*epsh3);
+        pos3((r-1)*ncol3+c, 3) = width3;
+        pos3((r-1)*ncol3+c, 4) = height3;
+    end
+end
+
+cb_gap_v   = 0.03;
+cb_h3      = 0.018;
+cb_row1_y  = 0.13;
+cb_row2_y  = cb_row1_y - cb_h3 - cb_gap_v;
+cb_pos3_hl   = [xstart3, cb_row1_y, width3, cb_h3];
+cb_pos3_diff = [xstart3, cb_row2_y, width3, cb_h3];
+
+panel_data3  = {sst_hi_mean(:,:,iseas_ann), ...
+                sst_lw_mean(:,:,iseas_ann), ...
+                sst_diff(:,:,iseas_ann)};
+panel_sig3   = {sig_hi(:,:,iseas_ann), ...
+                sig_lw(:,:,iseas_ann), ...
+                sig_diff(:,:,iseas_ann)};
+panel_clims3 = {clim_hl, clim_hl, clim_dfc};
+panel_labs3  = {'(a) High', '(b) Low', '(c) High \minus Low'};
+
+hfig4 = figure('Units','centimeters', ...
+               'Position',[0 0 page_width3 page_height3], ...
+               'PaperPosition',[0 0 page_width3 page_height3], ...
+               'Color',[1 1 1]);
+
+suptitle_y3 = pos3(1,2) + height3 + 0.04;
+annotation('textbox',[xstart3, suptitle_y3, width3, 0.05], ...
+           'String','ENSO\rightarrowTNA Causality — Annual SST Variability', ...
+           'FontName','Helvetica','FontSize',14,'FontWeight','bold', ...
+           'Color','k','HorizontalAlignment','center', ...
+           'VerticalAlignment','bottom','EdgeColor','none','FitBoxToText','off');
+
+for ip = 1:nrow3
+    dat_pc  = reorder(panel_data3{ip}(lat_idx,:));
+    sig_pc  = reorder(panel_sig3{ip}(lat_idx,:));
+    land_pc = reorder(land_orig(lat_idx,:));
+
+    ax = axes('Position', pos3(ip,:), 'Color', grey_rgb);
+    draw_panel(ax, dat_pc, sig_pc, land_pc, lon_pc, lat_use, ...
+               panel_clims3{ip}, cmap_use, lon_cut, lat_min, lat_max, ...
+               xtick_vals_pc, xtick_labels, ip==nrow3, ...
+               grey_rgb, green_rgb, nlat_sub, ...
+               dot_lat_gidx, dot_lon_pc_idx, dot_lat_vec, nlon, S);
+
+    annotation(hfig4,'textbox', ...
+               [xstart3-0.01, pos3(ip,2)+height3+0.002, 0.20, 0.025], ...
+               'String', panel_labs3{ip}, ...
+               'FontName','Helvetica','FontSize',11,'FontWeight','normal', ...
+               'Color','k','HorizontalAlignment','left', ...
+               'VerticalAlignment','bottom','EdgeColor','none','FitBoxToText','off');
+
+    axes('Position',ax.Position,'box','on','ytick',[],'xtick',[],'color','none');
+end
+
+ax_cb1 = axes('Position',pos3(nrow3,:),'Visible','off');
+colormap(ax_cb1, cmap_use); caxis(ax_cb1, clim_hl);
+cb1 = colorbar(ax_cb1,'Location','southoutside','Position',cb_pos3_hl);
+set(cb1,'Ticks',0:0.1:0.6,'TickLength',0.005/width3,'FontSize',10,'FontName','Helvetica','LineWidth',0.8);
+cb1ax = axes('Position',cb1.Position,'Visible','off');
+text(cb1ax, 0.5, -3.5, 'SST variability (°C)', ...
+     'FontName','Helvetica','FontSize',10,'HorizontalAlignment','center','Units','normalized');
+
+ax_cb2 = axes('Position',pos3(nrow3,:),'Visible','off');
+colormap(ax_cb2, cmap_use); caxis(ax_cb2, clim_dfc);
+cb2 = colorbar(ax_cb2,'Location','southoutside','Position',cb_pos3_diff);
+set(cb2,'Ticks',-0.15:0.05:0.15,'TickLength',0.005/width3,'FontSize',10,'FontName','Helvetica','LineWidth',0.8);
+cb2ax = axes('Position',cb2.Position,'Visible','off');
+text(cb2ax, 0.5, -3.5, '\DeltaSST variability (°C)', ...
+     'FontName','Helvetica','FontSize',10,'HorizontalAlignment','center','Units','normalized');
+
+print(hfig4,'-dtiff','-r600','GlobalSST_Var_Combined_Annual_v1.tif');
+fprintf('Saved: GlobalSST_Var_Combined_Annual_v1.tif\n');
+
+%% =========================================================
+%  LOCAL FUNCTION
+%% =========================================================
+function draw_panel(ax, dat_pc, sig_pc, land_pc, lon_pc, lat_use, ...
+                    clim_use, cmap_use, lon_cut, lat_min, lat_max, ...
+                    xtick_vals, xtick_labels, show_xlab, ...
+                    grey_rgb, green_rgb, nlat_sub, ...
+                    dot_lat_gidx, dot_lon_pc_idx, dot_lat_vec, nlon, S)
+
+    dat_plot = dat_pc;
+    dat_plot(land_pc) = NaN;
+
+    hi = imagesc(ax, lon_pc, lat_use, dat_plot);
+    set(hi, 'AlphaData', double(~land_pc));
+    set(ax, 'YDir','normal','Color',grey_rgb);
+    colormap(ax, cmap_use);
+    caxis(ax, clim_use);
+    set(ax, 'XLim',[lon_cut lon_cut+360],'YLim',[lat_min lat_max], ...
+            'XTick',xtick_vals,'YTick',[-60 -30 0 30 60], ...
+            'TickDir','out','TickLength',[0.008 0], ...
+            'FontName','Helvetica','FontSize',11, ...
+            'Layer','top','LineWidth',0.8);
+    if show_xlab
+        set(ax,'XTickLabel',xtick_labels);
+    else
+        set(ax,'XTickLabel',[]);
+    end
+    set(ax,'YTickLabel',{'60°S','30°S','0°','30°N','60°N'});
+    box(ax,'on');
+    hold(ax,'on');
+
+    % Green significance dots
+    for k = 1:length(dot_lat_vec)
+        ilat_g = dot_lat_gidx(k);
+        ilon_g = dot_lon_pc_idx(k);
+        if ilat_g < 1 || ilat_g > nlat_sub; continue; end
+        if ilon_g < 1 || ilon_g > nlon;      continue; end
+        if sig_pc(ilat_g,ilon_g) && ~land_pc(ilat_g,ilon_g)
+            plot(ax, lon_pc(ilon_g), lat_use(ilat_g), '.', ...
+                 'Color',green_rgb,'MarkerSize',4);
+        end
+    end
+
+    % Coastlines
+    for ipoly = 1:length(S)
+        px = S(ipoly).Lon(:); py = S(ipoly).Lat(:);
+        if isempty(px); continue; end
+        py(py < lat_min | py > lat_max) = NaN;
+        for lon_shift = [0, 360]
+            px_s = px + lon_shift;
+            in_range = px_s >= lon_cut & px_s <= lon_cut+360;
+            px_s(~in_range & ~isnan(px_s)) = NaN;
+            if any(~isnan(px_s) & ~isnan(py))
+                plot(ax, px_s, py,'-','Color',[0.2 0.2 0.2],'LineWidth',0.4);
+            end
+        end
+    end
+end
