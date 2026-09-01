@@ -1,0 +1,268 @@
+%% =========================================================
+%  火山喷发后10年（共11年窗口）全球SST异常 + Variability异常
+%  Eruption case (VOL+full forcing, 21 mem) MINUS
+%  Non-eruption case (SSI_VSK+GHG forcing, 10 mem)
+%  3行2列：3种火山(tropical/northern/southern) x 2列(mean/std)
+%  只画SST，不画u/v
+% =========================================================
+clear; clc;
+%% ---- (1) Eruption case：VOL + full forcing（21个成员）------
+load('C:\Users\yingy\Downloads\Data\Paleo3bs_Project\Result_Data\iLME_VOL_ts_mme.mat');
+sst = ts_per_fl(:,:,1:12000,:); clear ts_per_fl;
+load('C:\Users\yingy\Downloads\Data\Paleo3bs_Project\uv_sst_LME_15ens\iLME_full_ts_mme.mat');
+sst(:,:,:,7:21) = ts_per_fl(:,:,1:12000,:); clear ts_per_fl;
+sst_re = reshape(sst, 96, 144, 12, 1000, 21); clear sst;
+% 气候态：850-1850年全部1000年平均（该ensemble自身的气候态）
+sst_cli     = nanmean(sst_re, 4);                          % [96 144 12 1 21]
+sst_cli_rep = repmat(sst_cli, [1 1 1 1000 1]);
+sst_ano     = sst_re - sst_cli_rep;                      % [96 144 12 1000 21]
+clear sst_re sst_cli sst_cli_rep;
+% 年均距平 [96 144 1000 21]
+sst_ano_annual_erupt = squeeze(nanmean(sst_ano, 3));
+clear sst_ano;
+save -v7.3 vol_full.mat sst_ano_annual_erupt;
+%% ---- (2) Non-eruption case：SSI_VSK + GHG forcing（10个成员，无火山强迫）----
+load('C:\Users\yingy\Downloads\Data\Paleo3bs_Project\Result_Data\iLME_SSI_VSK_ts_mme.mat');
+sst = ts_per_fl(:,:,1:12000,:); clear ts_per_fl;
+load('C:\Users\yingy\Downloads\Data\Paleo3bs_Project\Result_Data\iLME_GHG_ts_mme.mat');
+sst(:,:,:,6:10) = ts_per_fl(:,:,1:12000,:); clear ts_per_fl;
+sst_re = reshape(sst, 96, 144, 12, 1000, 10); clear sst;
+% 气候态：同样用该ensemble自身850-1850年全部1000年平均
+sst_cli     = nanmean(sst_re, 4);                         % [96 144 12 1 10]
+sst_cli_rep = repmat(sst_cli, [1 1 1 1000 1]);
+sst_ano     = sst_re - sst_cli_rep;                       % [96 144 12 1000 10]
+clear sst_re sst_cli sst_cli_rep
+% 年均距平 [96 144 1000 10]
+sst_ano_annual_nonerupt = squeeze(nanmean(sst_ano, 3));
+clear sst_ano
+save ssi_GHG.mat sst_ano_annual_nonerupt;
+%% ---- (3) 定义火山事件（index为850年起的年份偏移量）--------
+% yr = 850:1849，index 1对应850年；两个ensemble共用同一套年份框架
+yr = 850:1849; yr = yr';
+tropical = [409 435 960 966];
+northern = [327 364 751 792 913 986];
+southern = [426 492 603];
+erupt_types  = {'Tropical', 'Northern', 'Southern'};
+erupt_events = {tropical, northern, southern};
+nens_erupt    = size(sst_ano_annual_erupt,    4);   % 21
+nens_nonerupt = size(sst_ano_annual_nonerupt, 4);   % 10
+nlat = 96; nlon = 144;
+%% ---- (4) 逐火山类型：喷发后11年(id:id+10) erupt vs 同一年份窗口的 nonerupt --------
+diff_mean = nan(nlat, nlon, 3);
+diff_std  = nan(nlat, nlon, 3);
+pv_mean   = nan(nlat, nlon, 3);
+pv_std    = nan(nlat, nlon, 3);
+for itype = 1:3
+    id_list = erupt_events{itype};
+    nevents = length(id_list);
+
+    erupt_mean_samps    = [];   % [96 144 nevents*nens_erupt]
+    erupt_std_samps     = [];
+    nonerupt_mean_samps = [];   % [96 144 nevents*nens_nonerupt]
+    nonerupt_std_samps  = [];
+
+    for iev = 1:nevents
+        id   = id_list(iev);
+        yr_s = id;
+        yr_e = min(id + 10, 1000);   % 不超过1000年，11年窗口（喷发当年为第1年）
+
+        % ---- eruption case：该窗口内，每个成员的年均值(mean state)和年际std(variability) ----
+        for iens = 1:nens_erupt
+            tmp_mean = nanmean(sst_ano_annual_erupt(:,:,yr_s:yr_e,iens), 3);   % [96 144]
+            erupt_mean_samps = cat(3, erupt_mean_samps, tmp_mean);
+            tmp_std  = nanstd(sst_ano_annual_erupt(:,:,yr_s:yr_e,iens), 0, 3); % [96 144]
+            erupt_std_samps  = cat(3, erupt_std_samps,  tmp_std);
+        end
+
+        % ---- non-eruption case：同一年份窗口(id:id+10)，每个成员的年均值和年际std ----
+        for iens = 1:nens_nonerupt
+            tmp_mean = nanmean(sst_ano_annual_nonerupt(:,:,yr_s:yr_e,iens), 3);
+            nonerupt_mean_samps = cat(3, nonerupt_mean_samps, tmp_mean);
+            tmp_std  = nanstd(sst_ano_annual_nonerupt(:,:,yr_s:yr_e,iens), 0, 3);
+            nonerupt_std_samps  = cat(3, nonerupt_std_samps,  tmp_std);
+        end
+    end
+
+    % ---- 样本平均 ----
+    mean_erupt    = nanmean(erupt_mean_samps,    3);   % [96 144]
+    mean_nonerupt = nanmean(nonerupt_mean_samps, 3);
+    std_erupt     = nanmean(erupt_std_samps,     3);
+    std_nonerupt  = nanmean(nonerupt_std_samps,  3);
+
+    % ---- diff：eruption case minus non-eruption case ----
+    diff_mean(:,:,itype) = mean_erupt - mean_nonerupt;
+    diff_std(:,:,itype)  = std_erupt  - std_nonerupt;
+
+    % ---- 两样本t检验：erupt samples vs nonerupt samples，逐格点，样本维度是第3维 ----
+    [~, p_mean] = ttest2(erupt_mean_samps, nonerupt_mean_samps, 'Dim', 3, 'Vartype', 'unequal');
+    pv_mean(:,:,itype) = p_mean;
+    [~, p_std]  = ttest2(erupt_std_samps,  nonerupt_std_samps,  'Dim', 3, 'Vartype', 'unequal');
+    pv_std(:,:,itype)  = p_std;
+
+    fprintf('Type %d (%s): %d events, erupt samples=%d, nonerupt samples=%d\n', ...
+            itype, erupt_types{itype}, nevents, nevents*nens_erupt, nevents*nens_nonerupt);
+end
+clear sst_ano_annual_erupt sst_ano_annual_nonerupt
+clear erupt_mean_samps erupt_std_samps nonerupt_mean_samps nonerupt_std_samps
+
+%% ---- (4.5) 【修正】经度重排：大西洋居中 -> 太平洋居中 ----------
+% 模式数据原始经度约定是"大西洋居中"(格林尼治在中间，太平洋被切到两侧边界)，
+% 而下面画图用的 lon 向量和处理过的海岸线数据都是"太平洋居中"(格林尼治在两侧边界)。
+% 两者约定不一致，这里之前漏掉了这一步，导致数据和海岸线错位180度。
+% 用circshift把经度维度(第2维)平移半圈(nlon/2列)，转成"太平洋居中"排列。
+diff_mean = circshift(diff_mean, [0, nlon/2, 0]);
+diff_std  = circshift(diff_std,  [0, nlon/2, 0]);
+pv_mean   = circshift(pv_mean,   [0, nlon/2, 0]);
+pv_std    = circshift(pv_std,    [0, nlon/2, 0]);
+
+%% ---- (5) 海陆mask + 经度重排（0-360 → 太平洋中心）---------
+hadisst = ncread('C:\Users\yingy\Downloads\Rice_mac\HadISST_sst.nc', 'sst');
+hadisst_per = permute(hadisst, [2 1 3]);
+mask_tmp = squeeze(hadisst_per(:,:,end)); clear hadisst hadisst_per;
+mask_tmp(~isnan(mask_tmp)) = 1;
+reso_lat = 1.875; reso_lon = 2.5;
+mask_sst = imresample([1 1], mask_tmp, [reso_lon, reso_lat], 'linear');
+% 【修正】mask同样需要做经度重排(大西洋居中 -> 太平洋居中)，
+% 否则mask会和已经circshift过的diff_mean/diff_std数据再次错位
+mask_sst = circshift(mask_sst, [0, nlon/2]);
+% 应用mask
+for itype = 1:3
+    diff_mean(:,:,itype) = diff_mean(:,:,itype) .* mask_sst;
+    diff_std(:,:,itype)  = diff_std(:,:,itype)  .* mask_sst;
+    pv_mean(:,:,itype)   = pv_mean(:,:,itype)   .* mask_sst;
+    pv_std(:,:,itype)    = pv_std(:,:,itype)    .* mask_sst;
+end
+% 经度重排：0-360格式已经是太平洋中心，直接用
+reso_lat = 1.875; reso_lon = 2.5;
+lat = 90 - reso_lat/2 : -reso_lat : -90 + reso_lat/2;
+lon = 0 + reso_lon/2 : reso_lon : 360 - reso_lon/2;
+% 海岸线处理
+load coastlines;
+iiid = find(coastlon < 0);
+coastlon_new = coastlon;
+coastlon_new(iiid) = coastlon(iiid) + 360;
+coastlon_new(coastlon_new >  359) = NaN;
+coastlon_new(coastlon_new < -359) = NaN;
+coastlat(coastlat >  89.5) = NaN;
+coastlat(coastlat < -89.5) = NaN;
+coastlat(coastlat > -0.25 & coastlat < 0.25) = NaN;
+%% ---- (6) 画图：3行2列 -------------------------------------
+page_width  = 20;
+page_height = 20;
+figure('Units','centimeters', ...
+    'Position',   [0 0 page_width page_height], ...
+    'PaperPosition',[0 0 page_width page_height], ...
+    'Color',[1 1 1]);
+nrow = 3; ncol = 2;
+width  = 0.375;
+height = width / 3;
+epsw   = 0.08;
+epsh   = 0.04;
+xstart = 0.08;
+ystart = 0.08;
+pos = zeros(nrow*ncol, 4);
+for r = 1:nrow
+    for c = 1:ncol
+        pos((r-1)*ncol+c, 1) = xstart + (c-1)*(width+epsw);
+        pos((r-1)*ncol+c, 2) = 1 - (ystart + r*height + (r-1)*epsh);
+        pos((r-1)*ncol+c, 3) = width;
+        pos((r-1)*ncol+c, 4) = height;
+    end
+end
+load BlueDarkRed18.mat;
+% 面板标签和行标题
+panel_labels = {'(a)','(b)','(c)','(d)','(e)','(f)'};
+row_labels   = {'Tropical','Northern','Southern'};
+col_titles   = {'Mean State Anomaly','Variability Anomaly'};
+clim_mean    = [-0.45  0.45];
+clim_std     = [-0.27  0.27];
+ip = 0;
+for irow = 1:nrow       % 3种火山
+    for icol = 1:ncol   % 1=mean state; 2=variability
+        ip = ip + 1;
+        if icol == 1
+            dat_plot = diff_mean(:,:,irow);
+            pv_plot  = pv_mean(:,:,irow);
+            clim_use = clim_mean;
+        else
+            dat_plot = diff_std(:,:,irow);
+            pv_plot  = pv_std(:,:,irow);
+            clim_use = clim_std;
+        end
+        ax = axes('Position', pos(ip,:), 'Color','none');
+        set(ax, 'YLim',[-45 45], 'YTick',-30:30:30, ...
+            'YTickLabel',{'30S','EQ','30N'}, ...
+            'XLim',[0.25 359.75], 'XTick',0:90:360, 'XTickLabel',[], ...
+            'TickDir','out', 'TickLength',[0.005/width, 0], ...
+            'FontName','Helvetica', 'FontSize',11);
+        % 最后一行加经度标签
+        if irow == nrow
+            text(ax, 0:90:360, [-58 -58 -58 -58 -58], ...
+                 {'0','90E','180','90W','0'}, ...
+                'FontName','Helvetica', 'HorizontalAlignment','center', ...
+                'FontSize',11, 'Rotation',0);
+        end
+        hold(ax, 'on');
+        % SST填色
+        imagesc(ax, lon, lat, dat_plot, 'AlphaData', ~isnan(dat_plot));
+        % 显著性标记（斜线）
+        seq = 2;
+        for iilat = 1:seq:size(pv_plot,1)
+            for iilon = 1:seq:size(pv_plot,2)
+                if ~isnan(pv_plot(iilat,iilon)) && pv_plot(iilat,iilon) < 0.05
+                    line(ax, ...
+                        [lon(iilon)-0.5*seq*reso_lon, lon(iilon)+0.5*seq*reso_lon], ...
+                        [lat(iilat)-0.5*seq*reso_lat, lat(iilat)+0.5*seq*reso_lat], ...
+                        'LineStyle','-','LineWidth',0.5,'Color','k');
+                end
+            end
+        end
+        colormap(ax, BlueDarkRed18);
+        clim(ax, clim_use);
+        % 海岸线
+        plot(ax, coastlon_new, coastlat, 'k', 'LineWidth', 0.5);
+        set(ax, 'YDir','normal', 'Layer','top');
+        % panel标签（左上角）
+        text(ax, 5, 38, panel_labels{ip}, ...
+            'FontName','Helvetica','FontSize',12,'FontWeight','bold', ...
+            'HorizontalAlignment','left','VerticalAlignment','top');
+        % 行标签（左侧，只在左列显示）
+        if icol == 1
+            text(ax, -15, 0, row_labels{irow}, ...
+                'FontName','Helvetica','FontSize',11,'FontWeight','bold', ...
+                'HorizontalAlignment','center','VerticalAlignment','middle', ...
+                'Rotation',90, 'Units','data');
+        end
+        % 列标题（只在第1行显示）
+        if irow == 1
+            text(ax, 0.5, 1.08, col_titles{icol}, ...
+                'Units','normalized','FontName','Helvetica','FontSize',11, ...
+                'FontWeight','bold','HorizontalAlignment','center');
+        end
+        box(ax, 'off');
+        axes('Position', pos(ip,:), 'box','on','ytick',[],'xtick',[],'color','none');
+    end
+end
+%% ---- 色标：左列（mean state）-------------------------------
+ax_cb1 = axes('Position',[xstart, 0.4, width, 0.015],'Visible','off');
+colormap(ax_cb1, BlueDarkRed18); clim(ax_cb1, clim_mean);
+cb1 = colorbar(ax_cb1,'Location','southoutside','Position',[xstart, 0.4, width, 0.015]);
+set(cb1,'Ticks',-0.4:0.2:0.4,'TickLength',0.005/width,'FontSize',11, ...
+    'FontName','Helvetica','LineWidth',0.8);
+cb1_ax2 = axes('Position',cb1.Position,'Visible','off');
+text(cb1_ax2, 0.5, -3.5, 'SSTA (^{\circ}C)', ...
+    'FontName','Helvetica','FontSize',11,'HorizontalAlignment','center','Units','normalized');
+
+%% ---- 色标：右列（variability）------------------------------
+ax_cb2 = axes('Position',[xstart+width+epsw, 0.4, width, 0.015],'Visible','off');
+colormap(ax_cb2, BlueDarkRed18); clim(ax_cb2, clim_std);
+cb2 = colorbar(ax_cb2,'Location','southoutside','Position',[xstart+width+epsw, 0.4, width, 0.015]);
+set(cb2,'Ticks',-0.27:0.09:0.27,'TickLength',0.005/width,'FontSize',11, ...
+    'FontName','Helvetica','LineWidth',0.8);
+cb2_ax2 = axes('Position',cb2.Position,'Visible','off');
+text(cb2_ax2, 0.5, -3.5, '\DeltaSST Variability (^{\circ}C)', ...
+    'FontName','Helvetica','FontSize',11,'HorizontalAlignment','center','Units','normalized');
+
+%% ---- 保存 --------------------------------------------------
+img = gcf;
+print(img, '-dtiff', '-r600', './LME_volcano_3types_MeanState_Var_11yr_erupt_minus_nonerupt.tif');
